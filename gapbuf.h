@@ -219,6 +219,7 @@ int gb_insert(struct gapbuf_s *pBuf, const char c) {
     if (!gaplen) {
         /* get the 'gb_buf' length */
         size_t buflen = pBuf->gb_buf[1] - pBuf->gb_buf[0];
+        (void) buflen;
 
         /* resize 'pBuf' by 2x 'gb_buf' length */
         /* ... */
