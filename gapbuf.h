@@ -51,44 +51,39 @@ extern "C" {
 /* 'struct gapbuf_s':
  * This structure defines memory layout of gap-buffer data structure.
  *
- * 'gb_dat':
- * Pointer to buffer data.
- *
  * 'gb_buf':
  * Fixed-size array of 2 character pointers.
- * Element '[0]' points to the first character of the buffer.
- * Element '[1]' points to the last character of the buffer.
- *
- * Example:
- *  'gb_buf' = "Hello, world!"
- *  'gb_buf[0]' = 'H'
- *  'gb_buf[1]' = '!'
- *
- * 'gb_cur':
- * Pointer to cursor position in the 'gb_buf' (equals to 'gb_gap[0]').
+ * - '[0]' : first character of the buffer.
+ * - '[1]' : last character of the buffer.
  *
  * 'gb_gap':
  * Fixed-size array of 2 character pointers.
- * Element '[0]' points to the beginning of the buffer cursor. 
- * Element '[1]' points to the end of the buffer cursor.
+ * - '[0]' : beginning of the buffer cursor. 
+ * - '[1]' : end of the buffer cursor.
  *
- * Example:
- *  'gb_buf' = "Hell[o-------], world!"
- *  'gb_buf[0]' = 'o'
- *  'gb_buf[1]' = '-' (last one in the square brackets)
+ * Example 01.:
+ * Imagine the gap-buffer of length: 16. We insert a new string: "Hello, world!".
+ * The layout would look like this:
+ * 'gb_buf' : [0]                                          [1]
+ * 'gb_gap' :                                        [0]   [1]
+ *   data   : [H][e][l][l][o][,][ ][w][o][r][l][d][!][ ][ ][ ]
+ *
+ * Example 02:
+ * The same scenario as before; length: 16, string: "Hello, world!".
+ * But this time, the cursor is shifted by 2 places to the LEFT.
+ * The layout would look like this:
+ * 'gb_buf' : [0]                                          [1]
+ * 'gb_gap' :                                  [0]   [1]
+ *   data   : [H][e][l][l][o][,][ ][w][o][r][l][ ][ ][ ][d][!]
  * */
 
 struct gapbuf_s {
-
-    char *gb_dat; /* 'gb_dat' - pointer to buffer data */
 
     char *gb_buf[2]; /* 'gb_buf':
                       * - [0] : begin
                       * - [1] : end
                       * */
     
-
-    char *gb_cur; /* gb_cur' - pointer to cursor position in the 'gb_buf' (equals to 'gb_gap[0]') */
 
     char *gb_gap[2]; /* 'gb_gap':
                       * - [0] : begin
@@ -110,7 +105,7 @@ int gb_clear(struct gapbuf_s *);
 int gb_insert(struct gapbuf_s *, const char);
 
 /* insert null-termianted c-string into the buffer under the current cursor */
-int gb_insert_c_string(struct gapbuf_s *, const char *);
+int gb_insert_cstr(struct gapbuf_s *, const char *);
 
 /* frontal extraction of character from the buffer (backspace-style) */
 int gb_extract_front(struct gapbuf_s *, char *);
@@ -126,6 +121,9 @@ int gb_left(struct gapbuf_s *);
 
 /* move the cursor right */
 int gb_right(struct gapbuf_s *);
+
+/* convert the buffer to null-terminated c-string */
+int gb_to_cstr(struct gapbuf_s *, char **);
 
 # if defined (__cplusplus)
 
@@ -163,7 +161,6 @@ int gb_create(struct gapbuf_s *pBuf, const size_t size) {
 
     /* return new 'pBuf' */
     *pBuf = (struct gapbuf_s) {
-        .gb_dat = data,
         .gb_buf = {
             [0] = data,
             [1] = data + size
@@ -185,10 +182,10 @@ int gb_free(struct gapbuf_s *pBuf) {
     if (!pBuf) { return (0); }
 
     /* clear 'pBuf' memory */
-    memset(pBuf->gb_dat, 0, pBuf->gb_buf[1] - pBuf->gb_buf[0]);
+    memset(pBuf->gb_buf[0], 0, pBuf->gb_buf[1] - pBuf->gb_buf[0]);
 
     /* release 'pBuf' memory */
-    free(pBuf->gb_dat);
+    free(pBuf->gb_buf[0]);
 
     /* success */
     return (1);
@@ -201,8 +198,7 @@ int gb_clear(struct gapbuf_s *pBuf) {
     if (!pBuf) { return (0); }
 
     /* re-alloc 'pBuf' into new, empty buffer */
-    gb_free(pBuf);
-    gb_create(pBuf, 1);
+    gb_free(pBuf); gb_create(pBuf, 1);
 
     /* success */
     return (1);
@@ -225,10 +221,8 @@ int gb_insert(struct gapbuf_s *pBuf, const char c) {
         /* ... */
      }
 
-    /* insert 'c' into 'gb_buf' under 'gb_cur' */
-    *pBuf->gb_cur = c;
-     pBuf->gb_cur++;
-     pBuf->gb_gap[0]++;
+    /* insert 'c' into 'gb_buf' under 'gb_gap[0]' */
+    *(pBuf->gb_gap[0]++) = c;
 
     /* success */
     return (1);
@@ -236,13 +230,15 @@ int gb_insert(struct gapbuf_s *pBuf, const char c) {
 
 
 /* insert null-termianted c-string into the buffer under the current cursor */
-int gb_insert_c_string(struct gapbuf_s *pBuf, const char *pStr) {
+int gb_insert_cstr(struct gapbuf_s *pBuf, const char *pStr) {
     /* null-check */
     if (!pBuf) { return (0); }
     if (!pStr) { return (0); }
 
     /* O(N) insertion */
-    while (gb_insert(pBuf, *pStr++));
+    for (size_t i = 0; pStr[i]; i++) {
+        gb_insert(pBuf, pStr[i]);
+    }
 
     /* success */
     return (1);
@@ -258,10 +254,8 @@ int gb_extract(struct gapbuf_s *pBuf, char *pOut) {
     /* space-check */
     size_t front = pBuf->gb_gap[0] - pBuf->gb_buf[0];
     if (front > 0) {
-        *pOut = *pBuf->gb_cur;
-        *pBuf->gb_cur = 0;
-         pBuf->gb_cur--;
-         pBuf->gb_gap[0]--;
+        *pOut = *pBuf->gb_gap[0];
+        *(pBuf->gb_gap[0])-- = 0;
     } 
 
     /* success */
@@ -297,11 +291,7 @@ int gb_left(struct gapbuf_s *pBuf) {
     /* space-check */
     size_t front = pBuf->gb_gap[0] - pBuf->gb_buf[0];
     if (front > 0) {
-        pBuf->gb_gap[0]--;
-        pBuf->gb_gap[1]--;
-        pBuf->gb_cur = pBuf->gb_gap[0];
-
-        *pBuf->gb_gap[1] = *pBuf->gb_gap[0];
+        *(pBuf->gb_gap[1]--) = *(--pBuf->gb_gap[0]); *(pBuf->gb_gap[0]) = 0;
     }
 
     /* success */
@@ -317,11 +307,39 @@ int gb_right(struct gapbuf_s *pBuf) {
     /* space-check */
     size_t back = pBuf->gb_buf[1] - pBuf->gb_gap[1];
     if (back > 0) {
-        *pBuf->gb_gap[0] = *pBuf->gb_gap[1];
-        
-        pBuf->gb_gap[0]++;
-        pBuf->gb_gap[1]++;
-        pBuf->gb_cur = pBuf->gb_gap[0];
+        *(pBuf->gb_gap[0]++) = *(++pBuf->gb_gap[1]); *(pBuf->gb_gap[1]) = 0;
+    }
+
+    /* success */
+    return (1);
+}
+
+
+/* convert the buffer to null-terminated c-string */
+int gb_to_cstr(struct gapbuf_s *pBuf, char **pStr) {
+    /* null-check */
+    if (!pBuf) { return (0); }
+    if (!pStr) { return (0); }
+
+    /* pivots */
+    char *sb = pBuf->gb_buf[0], *eb = pBuf->gb_buf[1];
+    char *sg = pBuf->gb_gap[0], *eg = pBuf->gb_gap[1];
+
+    /* create c-string */
+    char *tmp = (char *) calloc((eb - sb) + (eg - sg) + 1, sizeof(char));
+    if (!tmp) { return (0); }
+
+    /* return 'tmp' to 'pStr' */
+    *pStr = tmp;
+
+    /* copy 'pBuf' to 'tmp' */
+    while (sb < sg) {
+        *tmp++ = *sb++;
+    }
+
+    eg++;
+    while (eg <= eb) {
+        *tmp++ = *eg++;
     }
 
     /* success */
