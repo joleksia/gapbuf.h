@@ -114,7 +114,7 @@ int gb_insert(struct gapbuf_s *, const char);
 int gb_insert_cstr(struct gapbuf_s *, const char *);
 
 /* frontal extraction of character from the buffer (backspace-style) */
-int gb_extract_front(struct gapbuf_s *, char *);
+int gb_backspace(struct gapbuf_s *, char *);
 
 /* move the cursor up */
 int gb_up(struct gapbuf_s *);
